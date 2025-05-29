@@ -1,9 +1,10 @@
 from copy import copy
+from dataclasses import dataclass
 from enum import IntEnum
 import math
 from typing import Final, Literal, NewType, Optional, TypedDict
 
-from l2g.dol_system import DOLSystem, Symbol
+from l2g.l_system import LSystem, Symbol
 
 
 FEED_RATE: Final[float] = 400
@@ -26,6 +27,9 @@ class Position3D:
     def add(self, v: Vector2D) -> "Position3D":
         return Position3D(self.x + v.x, self.y + v.y, self.z)
 
+    def above(self, z: float = 5) -> "Position3D":
+        return Position3D(self.x, self.y, z)
+
     def build(self) -> str:
         ndigits = 2
         return f"X{round(self.x, ndigits=ndigits)} Y{round(self.y, ndigits=ndigits)} Z{round(self.z, ndigits=ndigits)}"
@@ -38,7 +42,10 @@ class Command(IntEnum):
 
 class GCodeInstruction:
     def __init__(
-        self, command: Command, dst_pos: Position3D, feed_rate: Optional[float] = None
+        self,
+        command: Command,
+        dst_pos: Position3D,
+        feed_rate: Optional[float] = FEED_RATE,
     ):
         self.dst_pos = dst_pos
         self.command = command
@@ -69,7 +76,7 @@ class PositionRange:
     def __init__(self, min: float = math.inf, max: float = -math.inf):
         self.min = min
         self.max = max
-    
+
     def update(self, curr_pos: float) -> "PositionRange":
         if curr_pos < self.min:
             return PositionRange(min=curr_pos, max=self.max)
@@ -77,45 +84,81 @@ class PositionRange:
             return PositionRange(min=self.min, max=curr_pos)
         else:
             return self
-    
+
     def __str__(self):
         return f"(min={self.min:.2f}, max={self.max:.2f})"
 
+
 type ProgramWithMeta = tuple[GCodeProgram, PositionRange, PositionRange]
 
+
+@dataclass
+class TurtleState:
+    position: Position3D
+    orientation: Orientation
+
+
 def build_g_code(
-    symbols: list[Symbol], angle_increment: Radian, step_size: float, init_angle: Radian = 0
+    symbols: list[Symbol],
+    angle_increment: Radian,
+    step_size: float,
+    init_angle: Radian = 0,
 ) -> ProgramWithMeta:
-    curr_orientation: Orientation = Orientation(init_angle)
-    curr_pos: Position3D = Position3D(z=-1)
+    state: TurtleState = TurtleState(
+        position=Position3D(z=-1), orientation=Orientation(init_angle)
+    )
+    stack: list[TurtleState] = []
     x_range: PositionRange = PositionRange()
     y_range: PositionRange = PositionRange()
     program = []
     for s in symbols:
         if s == "+":
-            curr_orientation = curr_orientation.angle_increment(angle_increment)
+            state.orientation = state.orientation.angle_increment(angle_increment)
         elif s == "-":
-            curr_orientation = curr_orientation.angle_increment(-angle_increment)
+            state.orientation = state.orientation.angle_increment(-angle_increment)
         elif s == "F" or s == "G":
-            curr_pos = curr_pos.add(curr_orientation.to_vector(step_size))
+            state.position = state.position.add(state.orientation.to_vector(step_size))
+        elif s == "[":
+            # stack push
+            stack.append(state)
+        elif s == "]":
+            prev_state = stack.pop()
+            above_curr = state.position.above()
+            above_prev = prev_state.position.above()
+            program += [
+                # First, we move back up
+                GCodeInstruction(command=Command.RAPID_POSITIONING, dst_pos=above_curr),
+                # Then, we move above the previous position
+                GCodeInstruction(command=Command.RAPID_POSITIONING, dst_pos=above_prev),
+                # Then, we move back down to the previous position
+                GCodeInstruction(
+                    command=Command.LINEAR_INTERPOLATION, dst_pos=prev_state.position
+                ),
+            ]
+            # reset the state to the state popped from the stack
+            state = prev_state
+            continue
         else:
             # A and B are ignored during drawing
             continue
 
-        x_range = x_range.update(curr_pos.x)
-        y_range = y_range.update(curr_pos.y)
+        x_range = x_range.update(state.position.x)
+        y_range = y_range.update(state.position.y)
         program.append(
             GCodeInstruction(
                 command=Command.LINEAR_INTERPOLATION,
-                dst_pos=curr_pos,
-                feed_rate=FEED_RATE,
+                dst_pos=state.position,
             )
         )
     return (program, x_range, y_range)
 
 
 def compile_program(
-    system: DOLSystem, nb_iterations: int, angle_increment: Radian, step_size: float, init_angle: Radian = 0
+    system: LSystem,
+    nb_iterations: int,
+    angle_increment: Radian,
+    step_size: float,
+    init_angle: Radian = 0,
 ) -> ProgramWithMeta:
     symbols = system.nth_iteration(nb_iterations)
     return build_g_code(symbols, angle_increment, step_size, init_angle)
@@ -129,8 +172,12 @@ def write_nc(program: ProgramWithMeta, file_name: str) -> None:
         "M3 S10000",  # Start spinning at 10000 rpm
         "G90",  # Absolute mode
         "G21",  # Metric mode (locations in millimeters)
-        GCodeInstruction(Command.RAPID_POSITIONING, dst_pos=Position3D(z=10)).build(),
-        GCodeInstruction(Command.LINEAR_INTERPOLATION, dst_pos=Position3D(z=-1)).build(),
+        GCodeInstruction(
+            Command.RAPID_POSITIONING, dst_pos=Position3D(z=10), feed_rate=None
+        ).build(),
+        GCodeInstruction(
+            Command.LINEAR_INTERPOLATION, dst_pos=Position3D(z=-1)
+        ).build(),
     ]
     lines += list(map(lambda i: i.build(), code))
     # Move the tool up out of the material

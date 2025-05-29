@@ -8,11 +8,11 @@ from l2g.code_gen import (
     compile_program,
     write_nc,
 )
-from l2g.dol_system import DOLSystem
+from l2g.l_system import LSystem
 
 
 KOCH_CURVE: Final[ProgramWithMeta] = compile_program(
-    system=DOLSystem(
+    system=LSystem(
         axiom=["F"],
         production_rules={"F": ["F", "+", "F", "-", "F", "-", "F", "+", "F"]},
     ),
@@ -22,7 +22,7 @@ KOCH_CURVE: Final[ProgramWithMeta] = compile_program(
 )
 
 HILBERT_CURVE: Final[ProgramWithMeta] = compile_program(
-    system=DOLSystem(
+    system=LSystem(
         axiom=["A"],
         production_rules={
             "A": ["+", "B", "F", "-", "A", "F", "A", "-", "F", "B", "+"],
@@ -35,18 +35,24 @@ HILBERT_CURVE: Final[ProgramWithMeta] = compile_program(
 )
 
 SIERPINSKY_TRIANGLE: Final[ProgramWithMeta] = compile_program(
-    system=DOLSystem(
+    system=LSystem(
         axiom=["F", "-", "G", "-", "G"],
         production_rules={
             "F": ["F", "-", "G", "+", "F", "+", "G", "-", "F"],
             "G": ["G", "G"],
         },
     ),
-    nb_iterations=6,
+    nb_iterations=5,
     angle_increment=math.pi * 2 / 3,
-    step_size=2,
+    step_size=4,
     init_angle=math.pi/2
 )
+
+# BARNSLEY_FERN: Final[ProgramWithMeta] = compile_program(
+#     system=LSystem(
+#         axiom=["-", "X"]
+#     )
+# )
 
 if __name__ == "__main__":
     write_nc(KOCH_CURVE, "koch")

@@ -1,13 +1,13 @@
 from typing import Literal
 
 
-type Symbol = Literal["A", "B", "F", "G", "+", "-"]
+type Symbol = Literal["A", "B", "F", "G", "+", "-", "[", "]"]
 
 type ProductionRules = dict[Symbol, list[Symbol]]
 
 
 
-class DOLSystem:
+class LSystem:
     """
     Deterministic, context-free, L-system
     """
