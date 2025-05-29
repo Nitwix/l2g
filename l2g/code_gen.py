@@ -24,10 +24,15 @@ class Position3D:
         self.y = y
         self.z = z
 
+    def __eq__(self, other):
+        if isinstance(other, Position3D):
+            return self.x == other.x and self.y == other.y and self.z == other.z
+        return False
+
     def add(self, v: Vector2D) -> "Position3D":
         return Position3D(self.x + v.x, self.y + v.y, self.z)
 
-    def above(self, z: float = 5) -> "Position3D":
+    def above(self, z: float = 3) -> "Position3D":
         return Position3D(self.x, self.y, z)
 
     def build(self) -> str:
@@ -53,7 +58,7 @@ class GCodeInstruction:
 
     def build(self):
         out = f"G{self.command:02} {self.dst_pos.build()}"
-        if not self.feed_rate is None:
+        if not self.feed_rate is None and self.command != Command.RAPID_POSITIONING:
             out += f" F{self.feed_rate}"
         return out
 
@@ -61,6 +66,11 @@ class GCodeInstruction:
 class Orientation:
     def __init__(self, angle: Radian):
         self.angle = angle % math.tau
+
+    def __eq__(self, other):
+        if isinstance(other, Orientation):
+            return self.angle == other.angle
+        return False
 
     def quarter_turn(self, direction: Literal[-1, 1] = 1) -> "Orientation":
         return Orientation(self.angle + direction * math.pi / 2)
@@ -97,6 +107,18 @@ class TurtleState:
     position: Position3D
     orientation: Orientation
 
+    def __eq__(self, other) -> bool:
+        if isinstance(other, TurtleState):
+            return (
+                self.position == other.position
+                and self.orientation == other.orientation
+            )
+        return False
+
+
+def deg_to_rad(angle: float) -> Radian:
+    return angle / 180 * math.pi
+
 
 def build_g_code(
     symbols: list[Symbol],
@@ -114,15 +136,21 @@ def build_g_code(
     for s in symbols:
         if s == "+":
             state.orientation = state.orientation.angle_increment(angle_increment)
+            continue
         elif s == "-":
             state.orientation = state.orientation.angle_increment(-angle_increment)
+            continue
         elif s == "F" or s == "G":
             state.position = state.position.add(state.orientation.to_vector(step_size))
         elif s == "[":
             # stack push
-            stack.append(state)
+            stack.append(copy(state))
+            continue
         elif s == "]":
             prev_state = stack.pop()
+            if prev_state == state:
+                # optimization: don't move if popped state same as current state
+                continue
             above_curr = state.position.above()
             above_prev = prev_state.position.above()
             program += [

@@ -1,7 +1,7 @@
 from typing import Literal
 
 
-type Symbol = Literal["A", "B", "F", "G", "+", "-", "[", "]"]
+type Symbol = Literal["A", "B", "X", "F", "G", "+", "-", "[", "]"]
 
 type ProductionRules = dict[Symbol, list[Symbol]]
 
