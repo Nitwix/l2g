@@ -7,7 +7,8 @@ from typing import Final, Literal, NewType, Optional, TypedDict
 from l2g.l_system import LSystem, Symbol
 
 
-FEED_RATE: Final[float] = 400
+FEED_RATE: Final[float] = 100
+LINE_DEPTH: Final[float] = -0.5
 type Radian = float
 type GCodeProgram = list[GCodeInstruction]
 
@@ -99,7 +100,15 @@ class PositionRange:
         return f"(min={self.min:.2f}, max={self.max:.2f})"
 
 
-type ProgramWithMeta = tuple[GCodeProgram, PositionRange, PositionRange]
+@dataclass
+class ProgramWithMeta:
+    code: GCodeProgram
+    x_range: PositionRange
+    y_range: PositionRange
+    nb_iterations: int
+    step_size: float
+    angle_increment: Radian
+    init_angle: Radian
 
 
 @dataclass
@@ -125,9 +134,9 @@ def build_g_code(
     angle_increment: Radian,
     step_size: float,
     init_angle: Radian = 0,
-) -> ProgramWithMeta:
+) -> tuple[GCodeProgram, PositionRange, PositionRange]:
     state: TurtleState = TurtleState(
-        position=Position3D(z=-1), orientation=Orientation(init_angle)
+        position=Position3D(z=LINE_DEPTH), orientation=Orientation(init_angle)
     )
     stack: list[TurtleState] = []
     x_range: PositionRange = PositionRange()
@@ -189,14 +198,27 @@ def compile_program(
     init_angle: Radian = 0,
 ) -> ProgramWithMeta:
     symbols = system.nth_iteration(nb_iterations)
-    return build_g_code(symbols, angle_increment, step_size, init_angle)
+    (code, x_range, y_range) = build_g_code(
+        symbols=symbols,
+        angle_increment=angle_increment,
+        step_size=step_size,
+        init_angle=init_angle,
+    )
+    return ProgramWithMeta(
+        code=code,
+        x_range=x_range,
+        y_range=y_range,
+        nb_iterations=nb_iterations,
+        step_size=step_size,
+        angle_increment=angle_increment,
+        init_angle=init_angle,
+    )
 
 
 def write_nc(program: ProgramWithMeta, file_name: str) -> None:
-    (code, x_range, y_range) = program
     lines: list[str] = [
-        f"; x_range = {x_range}",
-        f"; y_range = {y_range}",
+        f"; x_range = {program.x_range}",
+        f"; y_range = {program.y_range}",
         "M3 S10000",  # Start spinning at 10000 rpm
         "G90",  # Absolute mode
         "G21",  # Metric mode (locations in millimeters)
@@ -204,17 +226,17 @@ def write_nc(program: ProgramWithMeta, file_name: str) -> None:
             Command.RAPID_POSITIONING, dst_pos=Position3D(z=10), feed_rate=None
         ).build(),
         GCodeInstruction(
-            Command.LINEAR_INTERPOLATION, dst_pos=Position3D(z=-1)
+            Command.LINEAR_INTERPOLATION, dst_pos=Position3D(z=LINE_DEPTH)
         ).build(),
     ]
-    lines += list(map(lambda i: i.build(), code))
+    lines += list(map(lambda i: i.build(), program.code))
     # Move the tool up out of the material
-    last_pos = copy(code[-1].dst_pos)
+    last_pos = copy(program.code[-1].dst_pos)
     last_pos.z = 5
     lines.append(GCodeInstruction(Command.RAPID_POSITIONING, dst_pos=last_pos).build())
     # Stop the tool spinning
     lines.append("M5")
-    file_path = f"./build/{file_name}.nc"
+    file_path = f"./build/{file_name}_n{program.nb_iterations}_s{program.step_size:.2f}_ia{program.init_angle:.2f}_ai{program.angle_increment:.2f}.nc"
     with open(file_path, "w") as file:
         file.write("\n".join(lines))
 
