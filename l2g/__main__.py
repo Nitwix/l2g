@@ -4,6 +4,7 @@ import math
 from typing import Final
 from l2g.code_gen import (
     ProgramWithMeta,
+    Vector2D,
     compile_program,
     deg_to_rad,
     write_nc,
@@ -11,14 +12,15 @@ from l2g.code_gen import (
 from l2g.l_system import LSystem
 
 
-KOCH_CURVE: Final[ProgramWithMeta] = compile_program(
+KOCH_SNOWFLAKE: Final[ProgramWithMeta] = compile_program(
     system=LSystem(
-        axiom=["F"],
-        production_rules={"F": ["F", "+", "F", "-", "F", "-", "F", "+", "F"]},
+        axiom=["F", "+", "+", "F", "+", "+", "F"],
+        production_rules={"F": ["F", "-", "F", "+", "+", "F", "-", "F"]},
     ),
-    nb_iterations=3,
-    angle_increment=math.pi / 2,
-    step_size=5,
+    nb_iterations=6,
+    angle_increment=math.pi / 3,
+    step_size=1.5,
+    init_pos=Vector2D(0, 36)
 )
 
 HILBERT_CURVE: Final[ProgramWithMeta] = compile_program(
@@ -80,7 +82,7 @@ if __name__ == "__main__":
     if args.figure == Figure.BARNSLEY:
         write_nc(BARNSLEY_FERN, "barnsley")
     elif args.figure == Figure.KOCH:
-        write_nc(KOCH_CURVE, "koch")
+        write_nc(KOCH_SNOWFLAKE, "koch")
     elif args.figure == Figure.HILBERT:
         write_nc(HILBERT_CURVE, "hilbert")
     elif args.figure == Figure.SIERPINSKY:

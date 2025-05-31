@@ -14,7 +14,7 @@ type GCodeProgram = list[GCodeInstruction]
 
 
 class Vector2D:
-    def __init__(self, x: float, y: float):
+    def __init__(self, x: float = 0, y: float = 0):
         self.x = x
         self.y = y
 
@@ -134,27 +134,40 @@ def build_g_code(
     angle_increment: Radian,
     step_size: float,
     init_angle: Radian = 0,
+    init_pos: Vector2D = Vector2D()
 ) -> tuple[GCodeProgram, PositionRange, PositionRange]:
     state: TurtleState = TurtleState(
-        position=Position3D(z=LINE_DEPTH), orientation=Orientation(init_angle)
+        position=Position3D(x=init_pos.x, y=init_pos.y, z=LINE_DEPTH), orientation=Orientation(init_angle)
     )
     stack: list[TurtleState] = []
     x_range: PositionRange = PositionRange()
     y_range: PositionRange = PositionRange()
-    program = []
+    program: GCodeProgram = [
+        GCodeInstruction(
+            Command.RAPID_POSITIONING, dst_pos=Position3D(x=init_pos.x, y=init_pos.y, z=10), feed_rate=None
+        ),
+        GCodeInstruction(
+            Command.LINEAR_INTERPOLATION, dst_pos=Position3D(x=init_pos.x, y=init_pos.y, z=LINE_DEPTH)
+        ),
+    ]
     for s in symbols:
         if s == "+":
             state.orientation = state.orientation.angle_increment(angle_increment)
-            continue
         elif s == "-":
             state.orientation = state.orientation.angle_increment(-angle_increment)
-            continue
         elif s == "F" or s == "G":
             state.position = state.position.add(state.orientation.to_vector(step_size))
+            x_range = x_range.update(state.position.x)
+            y_range = y_range.update(state.position.y)
+            program.append(
+                GCodeInstruction(
+                    command=Command.LINEAR_INTERPOLATION,
+                    dst_pos=state.position,
+                )
+            )
         elif s == "[":
             # stack push
             stack.append(copy(state))
-            continue
         elif s == "]":
             prev_state = stack.pop()
             if prev_state == state:
@@ -174,19 +187,10 @@ def build_g_code(
             ]
             # reset the state to the state popped from the stack
             state = prev_state
-            continue
-        else:
-            # A and B are ignored during drawing
-            continue
+        
+        # Other symbols are ignored during drawing
 
-        x_range = x_range.update(state.position.x)
-        y_range = y_range.update(state.position.y)
-        program.append(
-            GCodeInstruction(
-                command=Command.LINEAR_INTERPOLATION,
-                dst_pos=state.position,
-            )
-        )
+        
     return (program, x_range, y_range)
 
 
@@ -196,6 +200,7 @@ def compile_program(
     angle_increment: Radian,
     step_size: float,
     init_angle: Radian = 0,
+    init_pos: Vector2D = Vector2D()
 ) -> ProgramWithMeta:
     symbols = system.nth_iteration(nb_iterations)
     (code, x_range, y_range) = build_g_code(
@@ -203,6 +208,7 @@ def compile_program(
         angle_increment=angle_increment,
         step_size=step_size,
         init_angle=init_angle,
+        init_pos=init_pos,
     )
     return ProgramWithMeta(
         code=code,
@@ -222,12 +228,6 @@ def write_nc(program: ProgramWithMeta, file_name: str) -> None:
         "M3 S10000",  # Start spinning at 10000 rpm
         "G90",  # Absolute mode
         "G21",  # Metric mode (locations in millimeters)
-        GCodeInstruction(
-            Command.RAPID_POSITIONING, dst_pos=Position3D(z=10), feed_rate=None
-        ).build(),
-        GCodeInstruction(
-            Command.LINEAR_INTERPOLATION, dst_pos=Position3D(z=LINE_DEPTH)
-        ).build(),
     ]
     lines += list(map(lambda i: i.build(), program.code))
     # Move the tool up out of the material
